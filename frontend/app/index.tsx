@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, borderRadius, typography } from './theme';
@@ -42,9 +42,11 @@ export default function Index() {
       {/* Header with Logo */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <View style={styles.logoIcon}>
-            <Ionicons name="people" size={40} color={colors.white} />
-          </View>
+          <Image 
+            source={require('../assets/images/logo.png')} 
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
           <Text style={styles.appName}>JoinUp</Text>
         </View>
         <Text style={styles.tagline}>Your College Events, Digitized</Text>
