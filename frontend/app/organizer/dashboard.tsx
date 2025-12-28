@@ -169,14 +169,17 @@ export default function OrganizerDashboard() {
         </View>
         
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="list" size={18} color={colors.primary} />
-            <Text style={styles.actionText}>View Registrations</Text>
+          <TouchableOpacity 
+            style={styles.actionBtn}
+            onPress={() => router.push(`/organizer/qr-scanner?eventId=${item.id}`)}
+          >
+            <Ionicons name="qr-code-outline" size={18} color={colors.secondary} />
+            <Text style={styles.actionText}>Scan QR</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="qr-code-outline" size={18} color={colors.secondary} />
-            <Text style={styles.actionText}>Scan QR</Text>
+            <Ionicons name="list" size={18} color={colors.primary} />
+            <Text style={styles.actionText}>View List</Text>
           </TouchableOpacity>
         </View>
       </View>
