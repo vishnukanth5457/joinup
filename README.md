@@ -140,37 +140,47 @@ git clone <repository-url>
 cd app
 ```
 
-2. **Install Backend Dependencies**
+2. **Setup Database**
+```bash
+# Create indexes (required)
+cd database
+python3 create_indexes.py
+
+# Seed sample data (optional - for testing)
+python3 seed_data.py
+```
+
+3. **Install Backend Dependencies**
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-3. **Install Frontend Dependencies**
+4. **Install Frontend Dependencies**
 ```bash
 cd frontend
 yarn install
 ```
 
-4. **Start MongoDB**
+5. **Start MongoDB**
 ```bash
 # Ensure MongoDB is running on localhost:27017
 mongod
 ```
 
-5. **Start Backend Server**
+6. **Start Backend Server**
 ```bash
 cd backend
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-6. **Start Expo Development Server**
+7. **Start Expo Development Server**
 ```bash
 cd frontend
 yarn start
 ```
 
-7. **Run on Device/Emulator**
+8. **Run on Device/Emulator**
 - Scan QR code with Expo Go app (iOS/Android)
 - Press `a` for Android emulator
 - Press `i` for iOS simulator
