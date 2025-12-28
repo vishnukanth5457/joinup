@@ -8,10 +8,10 @@ import {
   Modal,
 } from 'react-native';
 import { BarCodeScanner } from 'expo-barcode-scanner';
-import { useApi } from '../../../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from '../../theme';
+import { colors, spacing, borderRadius, typography } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useApi } from '../../context/AuthContext';
 
 export default function QRScanner() {
   const api = useApi();
