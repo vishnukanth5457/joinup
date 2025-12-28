@@ -50,6 +50,7 @@ class EventBase(BaseModel):
     college: str
     category: Optional[str] = "General"
     max_participants: Optional[int] = None
+    image: Optional[str] = None  # base64 image
 
 class EventCreate(EventBase):
     pass
@@ -59,6 +60,8 @@ class Event(EventBase):
     organizer_id: str
     organizer_name: str
     current_registrations: int = 0
+    average_rating: float = 0.0
+    total_ratings: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
@@ -102,6 +105,23 @@ class Certificate(BaseModel):
     class Config:
         from_attributes = True
 
+class RatingCreate(BaseModel):
+    event_id: str
+    rating: int = Field(ge=1, le=5)
+    feedback: Optional[str] = None
+
+class Rating(BaseModel):
+    id: str
+    event_id: str
+    student_id: str
+    student_name: str
+    rating: int
+    feedback: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        from_attributes = True
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -112,3 +132,12 @@ class StudentDashboard(BaseModel):
     attended_events: int
     certificates_earned: int
     upcoming_events: int
+
+class OrganizerAnalytics(BaseModel):
+    total_events: int
+    total_registrations: int
+    total_attendees: int
+    upcoming_events: int
+    past_events: int
+    average_rating: float
+    top_events: List[dict]
