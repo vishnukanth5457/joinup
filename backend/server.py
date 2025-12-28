@@ -321,6 +321,176 @@ async def get_student_dashboard(current_user: dict = Depends(require_role([UserR
         upcoming_events=upcoming
     )
 
+@api_router.get("/dashboard/organizer", response_model=OrganizerAnalytics)
+async def get_organizer_analytics(current_user: dict = Depends(require_role([UserRole.ORGANIZER]))):
+    events = await db.events.find({"organizer_id": current_user["sub"]}).to_list(1000)
+    
+    total_events = len(events)
+    total_registrations = sum(event["current_registrations"] for event in events)
+    
+    # Count attendees
+    total_attendees = 0
+    for event in events:
+        attendees = await db.registrations.count_documents({
+            "event_id": event["id"],
+            "attendance_marked": True
+        })
+        total_attendees += attendees
+    
+    # Count upcoming vs past events
+    now = datetime.utcnow()
+    upcoming_events = sum(1 for event in events if event["date"] > now)
+    past_events = total_events - upcoming_events
+    
+    # Calculate average rating
+    total_rating = sum(event.get("average_rating", 0) * event.get("total_ratings", 0) for event in events)
+    total_rating_count = sum(event.get("total_ratings", 0) for event in events)
+    average_rating = total_rating / total_rating_count if total_rating_count > 0 else 0.0
+    
+    # Get top events by registrations
+    sorted_events = sorted(events, key=lambda x: x["current_registrations"], reverse=True)[:5]
+    top_events = [
+        {
+            "id": event["id"],
+            "title": event["title"],
+            "registrations": event["current_registrations"],
+            "rating": event.get("average_rating", 0)
+        }
+        for event in sorted_events
+    ]
+    
+    return OrganizerAnalytics(
+        total_events=total_events,
+        total_registrations=total_registrations,
+        total_attendees=total_attendees,
+        upcoming_events=upcoming_events,
+        past_events=past_events,
+        average_rating=round(average_rating, 2),
+        top_events=top_events
+    )
+
+# ============= RATING & FEEDBACK ROUTES =============
+@api_router.post("/ratings", response_model=Rating)
+async def create_rating(
+    rating_data: RatingCreate,
+    current_user: dict = Depends(require_role([UserRole.STUDENT]))
+):
+    # Check if event exists
+    event = await db.events.find_one({"id": rating_data.event_id})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Check if student attended the event
+    registration = await db.registrations.find_one({
+        "student_id": current_user["sub"],
+        "event_id": rating_data.event_id,
+        "attendance_marked": True
+    })
+    if not registration:
+        raise HTTPException(status_code=400, detail="Can only rate events you attended")
+    
+    # Check if already rated
+    existing_rating = await db.ratings.find_one({
+        "student_id": current_user["sub"],
+        "event_id": rating_data.event_id
+    })
+    if existing_rating:
+        raise HTTPException(status_code=400, detail="Already rated this event")
+    
+    # Get student info
+    student = await db.users.find_one({"id": current_user["sub"]})
+    
+    # Create rating
+    rating_dict = {
+        "id": str(uuid.uuid4()),
+        "event_id": rating_data.event_id,
+        "student_id": current_user["sub"],
+        "student_name": student["name"],
+        "rating": rating_data.rating,
+        "feedback": rating_data.feedback,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.ratings.insert_one(rating_dict)
+    
+    # Update event average rating
+    all_ratings = await db.ratings.find({"event_id": rating_data.event_id}).to_list(1000)
+    avg_rating = sum(r["rating"] for r in all_ratings) / len(all_ratings)
+    
+    await db.events.update_one(
+        {"id": rating_data.event_id},
+        {"$set": {"average_rating": round(avg_rating, 2), "total_ratings": len(all_ratings)}}
+    )
+    
+    del rating_dict["_id"]
+    return Rating(**rating_dict)
+
+@api_router.get("/ratings/event/{event_id}", response_model=List[Rating])
+async def get_event_ratings(event_id: str, current_user: dict = Depends(get_current_user)):
+    ratings = await db.ratings.find({"event_id": event_id}).sort("created_at", -1).to_list(1000)
+    return [Rating(**{**rating, "_id": str(rating["_id"])}) for rating in ratings]
+
+# ============= RECOMMENDATIONS =============
+@api_router.get("/recommendations", response_model=List[Event])
+async def get_recommendations(current_user: dict = Depends(require_role([UserRole.STUDENT]))):
+    # Get student's registrations to understand preferences
+    registrations = await db.registrations.find({"student_id": current_user["sub"]}).to_list(1000)
+    registered_event_ids = [reg["event_id"] for reg in registrations]
+    
+    # Get events student registered for
+    registered_events = []
+    for event_id in registered_event_ids:
+        event = await db.events.find_one({"id": event_id})
+        if event:
+            registered_events.append(event)
+    
+    # Extract preferred categories
+    preferred_categories = {}
+    for event in registered_events:
+        category = event.get("category", "General")
+        preferred_categories[category] = preferred_categories.get(category, 0) + 1
+    
+    # Get student's college for local events priority
+    student = await db.users.find_one({"id": current_user["sub"]})
+    student_college = student.get("college", "")
+    
+    # Get all upcoming events not yet registered
+    all_events = await db.events.find({
+        "id": {"$nin": registered_event_ids},
+        "date": {"$gt": datetime.utcnow()}
+    }).to_list(1000)
+    
+    # Score events based on multiple factors
+    scored_events = []
+    for event in all_events:
+        score = 0
+        
+        # Category preference (40% weight)
+        category = event.get("category", "General")
+        if category in preferred_categories:
+            score += 40 * (preferred_categories[category] / len(registered_events))
+        
+        # Same college (30% weight)
+        if event.get("college") == student_college:
+            score += 30
+        
+        # Rating (20% weight)
+        avg_rating = event.get("average_rating", 0)
+        score += 20 * (avg_rating / 5.0)
+        
+        # Popularity (10% weight)
+        registrations_count = event.get("current_registrations", 0)
+        if registrations_count > 0:
+            score += 10 * min(registrations_count / 50.0, 1.0)
+        
+        scored_events.append((score, event))
+    
+    # Sort by score and return top 10
+    scored_events.sort(key=lambda x: x[0], reverse=True)
+    recommended_events = [event for score, event in scored_events[:10]]
+    
+    return [Event(**{**event, "_id": str(event["_id"])}) for event in recommended_events]
+
 # ============= ADMIN ROUTES =============
 @api_router.get("/admin/users", response_model=List[User])
 async def get_all_users(current_user: dict = Depends(require_role([UserRole.ADMIN]))):
