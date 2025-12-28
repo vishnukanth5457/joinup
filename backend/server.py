@@ -13,7 +13,8 @@ from models import (
     UserCreate, UserLogin, User, TokenResponse, UserRole,
     EventCreate, Event, RegistrationCreate, Registration,
     AttendanceMarkRequest, CertificateIssueRequest, Certificate,
-    StudentDashboard, PaymentStatus
+    StudentDashboard, PaymentStatus, RatingCreate, Rating,
+    OrganizerAnalytics
 )
 from auth import (
     get_password_hash, verify_password, create_access_token,
