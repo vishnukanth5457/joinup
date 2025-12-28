@@ -87,9 +87,7 @@ JoinUp replaces WhatsApp groups, Google Forms, Excel sheets, and manual attendan
 │   │   │   ├── my-events.tsx  # Registered events
 │   │   │   └── profile.tsx    # Student profile
 │   │   ├── organizer/         # Organizer screens
-│   │   │   ├── dashboard.tsx
-│   │   │   ├── analytics.tsx  # Analytics dashboard
-│   │   │   └── qr-scanner.tsx # QR code scanner
+│   │   │   └── dashboard.tsx
 │   │   └── admin/             # Admin screens
 │   │       └── dashboard.tsx
 │   ├── context/
@@ -97,14 +95,6 @@ JoinUp replaces WhatsApp groups, Google Forms, Excel sheets, and manual attendan
 │   ├── assets/
 │   ├── package.json
 │   └── .env              # Expo environment variables
-├── database/              # Database configuration & scripts
-│   ├── README.md         # Full database documentation
-│   ├── QUICKSTART.md     # Quick setup guide
-│   ├── create_indexes.py # Index creation script
-│   ├── seed_data.py      # Sample data seeding
-│   ├── clear_database.py # Clear all data
-│   ├── backup.sh         # Automated backup
-│   └── restore.sh        # Database restore
 └── README.md
 ```
 
@@ -140,47 +130,37 @@ git clone <repository-url>
 cd app
 ```
 
-2. **Setup Database**
-```bash
-# Create indexes (required)
-cd database
-python3 create_indexes.py
-
-# Seed sample data (optional - for testing)
-python3 seed_data.py
-```
-
-3. **Install Backend Dependencies**
+2. **Install Backend Dependencies**
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-4. **Install Frontend Dependencies**
+3. **Install Frontend Dependencies**
 ```bash
 cd frontend
 yarn install
 ```
 
-5. **Start MongoDB**
+4. **Start MongoDB**
 ```bash
 # Ensure MongoDB is running on localhost:27017
 mongod
 ```
 
-6. **Start Backend Server**
+5. **Start Backend Server**
 ```bash
 cd backend
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-7. **Start Expo Development Server**
+6. **Start Expo Development Server**
 ```bash
 cd frontend
 yarn start
 ```
 
-8. **Run on Device/Emulator**
+7. **Run on Device/Emulator**
 - Scan QR code with Expo Go app (iOS/Android)
 - Press `a` for Android emulator
 - Press `i` for iOS simulator
