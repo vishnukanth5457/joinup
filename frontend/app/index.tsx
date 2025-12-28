@@ -53,7 +53,11 @@ export default function Index() {
       </View>
 
       {/* Role Selection */}
-      <View style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.title}>Welcome! Choose Your Role</Text>
         
         <TouchableOpacity 
