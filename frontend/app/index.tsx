@@ -98,7 +98,7 @@ export default function Index() {
             Manage users and oversee platform
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
 }
