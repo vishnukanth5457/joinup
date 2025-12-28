@@ -215,13 +215,23 @@ export default function OrganizerDashboard() {
       </View>
 
       {/* Create Event Button */}
-      <TouchableOpacity 
-        style={styles.createButton}
-        onPress={() => setShowCreateModal(true)}
-      >
-        <Ionicons name="add-circle" size={24} color={colors.white} />
-        <Text style={styles.createButtonText}>Create New Event</Text>
-      </TouchableOpacity>
+      <View style={styles.buttonRow}>
+        <TouchableOpacity 
+          style={[styles.createButton, { flex: 1, marginRight: spacing.sm }]}
+          onPress={() => setShowCreateModal(true)}
+        >
+          <Ionicons name="add-circle" size={24} color={colors.white} />
+          <Text style={styles.createButtonText}>Create Event</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.analyticsButton, { flex: 1, marginLeft: spacing.sm }]}
+          onPress={() => router.push('/organizer/analytics')}
+        >
+          <Ionicons name="stats-chart" size={24} color={colors.white} />
+          <Text style={styles.createButtonText}>Analytics</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Events List */}
       {loading ? (
