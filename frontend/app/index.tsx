@@ -145,7 +145,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
     padding: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   title: {
     ...typography.h2,
