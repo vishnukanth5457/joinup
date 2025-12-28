@@ -87,7 +87,9 @@ JoinUp replaces WhatsApp groups, Google Forms, Excel sheets, and manual attendan
 │   │   │   ├── my-events.tsx  # Registered events
 │   │   │   └── profile.tsx    # Student profile
 │   │   ├── organizer/         # Organizer screens
-│   │   │   └── dashboard.tsx
+│   │   │   ├── dashboard.tsx
+│   │   │   ├── analytics.tsx  # Analytics dashboard
+│   │   │   └── qr-scanner.tsx # QR code scanner
 │   │   └── admin/             # Admin screens
 │   │       └── dashboard.tsx
 │   ├── context/
@@ -95,6 +97,14 @@ JoinUp replaces WhatsApp groups, Google Forms, Excel sheets, and manual attendan
 │   ├── assets/
 │   ├── package.json
 │   └── .env              # Expo environment variables
+├── database/              # Database configuration & scripts
+│   ├── README.md         # Full database documentation
+│   ├── QUICKSTART.md     # Quick setup guide
+│   ├── create_indexes.py # Index creation script
+│   ├── seed_data.py      # Sample data seeding
+│   ├── clear_database.py # Clear all data
+│   ├── backup.sh         # Automated backup
+│   └── restore.sh        # Database restore
 └── README.md
 ```
 
