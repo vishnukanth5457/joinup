@@ -1,7 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../theme';
+import { colors } from '../../../theme';
 
 export default function StudentTabsLayout() {
   return (

@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { useAuth } from '../../../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from '../../theme';
+import { colors, spacing, borderRadius, typography } from '../../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -27,8 +27,15 @@ export default function Profile() {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await logout();
-            router.replace('/');
+            try {
+              console.log('[Profile] Logout button pressed, calling logout()');
+              await logout();
+              console.log('[Profile] Logout completed successfully');
+              // Don't navigate here - index.tsx will handle navigation when user becomes null
+            } catch (error) {
+              console.error('[Profile] Logout failed:', error);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
           },
         },
       ]

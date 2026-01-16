@@ -9,12 +9,19 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from '../theme';
+import { colors, spacing, borderRadius, typography } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { getErrorMessage } from '../../utils/apiHelpers';
+
+const validateEmail = (email: string): boolean => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
 
 export default function Login() {
   const router = useRouter();
@@ -23,19 +30,41 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please fill all fields');
+    setError(null);
+
+    // Validation
+    if (!email.trim()) {
+      setError('Email is required');
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
+    if (!password) {
+      setError('Password is required');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
       return;
     }
 
     setLoading(true);
     try {
       await login(email, password);
+      setError(null);
       // Navigation will be handled by the AuthContext
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message);
+      const errorMessage = getErrorMessage(error);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -64,6 +93,13 @@ export default function Login() {
         </View>
 
         <View style={styles.form}>
+          {error && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={20} color={colors.error} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
           <View style={styles.inputContainer}>
             <Ionicons name="mail" size={20} color={colors.textSecondary} style={styles.inputIcon} />
             <TextInput
@@ -73,6 +109,7 @@ export default function Login() {
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={!loading}
               placeholderTextColor={colors.textSecondary}
             />
           </View>
@@ -84,9 +121,20 @@ export default function Login() {
               placeholder="Password"
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
+              secureTextEntry={!showPassword}
+              editable={!loading}
               placeholderTextColor={colors.textSecondary}
             />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons 
+                name={showPassword ? "eye" : "eye-off"} 
+                size={20} 
+                color={colors.textSecondary} 
+              />
+            </TouchableOpacity>
           </View>
 
           <TouchableOpacity 
@@ -154,6 +202,23 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
   },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.error + '15',
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.error,
+  },
+  errorText: {
+    ...typography.bodySmall,
+    color: colors.error,
+    marginLeft: spacing.sm,
+    flex: 1,
+  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -166,6 +231,9 @@ const styles = StyleSheet.create({
   },
   inputIcon: {
     marginRight: spacing.sm,
+  },
+  eyeIcon: {
+    padding: spacing.sm,
   },
   input: {
     flex: 1,

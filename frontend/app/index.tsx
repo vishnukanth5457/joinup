@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from './theme';
+import { colors, spacing, borderRadius, typography } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 
@@ -11,26 +11,37 @@ export default function Index() {
   const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (!loading && user) {
-      // Navigate based on role
-      switch (user.role) {
-        case 'student':
-          router.replace('/student/(tabs)');
-          break;
-        case 'organizer':
-          router.replace('/organizer/dashboard');
-          break;
-        case 'admin':
-          router.replace('/admin/dashboard');
-          break;
-      }
+    console.log('[Index] useEffect triggered - user:', user?.email || 'null', 'loading:', loading);
+    
+    if (loading) {
+      console.log('[Index] Still loading auth state, skipping logic');
+      return;
     }
-  }, [user, loading]);
+    
+    if (user) {
+      // User is logged in, navigate to appropriate dashboard
+      const navigationMap: { [key: string]: string } = {
+        'student': '/student/(tabs)',
+        'organizer': '/organizer/dashboard',
+        'admin': '/admin/dashboard',
+      };
+      
+      const route = navigationMap[user.role];
+      console.log('[Index] User logged in, navigating to:', route);
+      if (route) {
+        router.replace(route);
+      }
+    } else {
+      // User is null (either never logged in or just logged out)
+      console.log('[Index] User is null - showing landing page');
+    }
+  }, [user, loading, router]);
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading...</Text>
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { marginTop: spacing.md }]}>Loading...</Text>
       </View>
     );
   }
@@ -107,6 +118,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.surface,
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loadingText: {
     ...typography.body,

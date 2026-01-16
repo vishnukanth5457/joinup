@@ -13,7 +13,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useAuth, useApi } from '../../../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from '../../theme';
+import { colors, spacing, borderRadius, typography } from '../../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { format } from 'date-fns';
@@ -34,7 +34,7 @@ interface Event {
 }
 
 export default function Discover() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const api = useApi();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +95,27 @@ export default function Discover() {
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
     setShowEventModal(true);
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+            } catch (error) {
+              Alert.alert('Error', 'Failed to logout');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleRegister = async () => {
@@ -193,6 +214,9 @@ export default function Discover() {
           <Text style={styles.headerTitle}>Discover Events</Text>
           <Text style={styles.headerSubtitle}>Hello, {user?.name}!</Text>
         </View>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutIconButton}>
+          <Ionicons name="log-out" size={24} color={colors.error} />
+        </TouchableOpacity>
       </View>
 
       {/* Stats Cards */}
@@ -428,6 +452,12 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  logoutIconButton: {
+    padding: spacing.sm,
   },
   headerTitle: {
     ...typography.h2,

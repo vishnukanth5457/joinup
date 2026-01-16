@@ -10,7 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { useApi } from '../../../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from '../../theme';
+import { colors, spacing, borderRadius, typography } from '../../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { format } from 'date-fns';

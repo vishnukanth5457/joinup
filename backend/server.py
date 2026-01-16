@@ -1,523 +1,418 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, EmailStr
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+import jwt
+import bcrypt
 import os
+from dotenv import load_dotenv
 import logging
-from pathlib import Path
-from typing import List
 import uuid
-from datetime import datetime, timedelta
 
-from models import (
-    UserCreate, UserLogin, User, TokenResponse, UserRole,
-    EventCreate, Event, RegistrationCreate, Registration,
-    AttendanceMarkRequest, CertificateIssueRequest, Certificate,
-    StudentDashboard, PaymentStatus, RatingCreate, Rating,
-    OrganizerAnalytics
-)
-from auth import (
-    get_password_hash, verify_password, create_access_token,
-    get_current_user, require_role
-)
-from utils import generate_qr_code, generate_certificate_pdf
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
-app = FastAPI(title="JoinUp API", version="1.0.0")
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ============= AUTH ROUTES =============
-@api_router.post("/auth/register", response_model=TokenResponse)
-async def register(user_data: UserCreate):
-    # Check if user exists
-    existing_user = await db.users.find_one({"email": user_data.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create user
-    user_dict = user_data.model_dump()
-    user_dict["password"] = get_password_hash(user_data.password)
-    user_dict["id"] = str(uuid.uuid4())
-    user_dict["is_approved"] = True if user_data.role != UserRole.ORGANIZER else True  # Auto-approve for MVP
-    user_dict["created_at"] = datetime.utcnow()
-    
-    await db.users.insert_one(user_dict)
-    
-    # Create token
-    access_token = create_access_token(data={"sub": user_dict["id"], "role": user_dict["role"]})
-    
-    # Remove password from response
-    del user_dict["password"]
-    del user_dict["_id"]
-    
-    return TokenResponse(access_token=access_token, user=User(**user_dict))
+# Load environment variables
+load_dotenv()
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DB_NAME", "joinup")
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_DAYS = 7
 
-@api_router.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email})
-    if not user or not verify_password(credentials.password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    if not user.get("is_approved", True):
-        raise HTTPException(status_code=403, detail="Account not approved yet")
-    
-    access_token = create_access_token(data={"sub": user["id"], "role": user["role"]})
-    
-    del user["password"]
-    del user["_id"]
-    
-    return TokenResponse(access_token=access_token, user=User(**user))
+# Initialize MongoDB
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
-@api_router.get("/auth/me", response_model=User)
-async def get_me(current_user: dict = Depends(get_current_user)):
-    user = await db.users.find_one({"id": current_user["sub"]})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    del user["password"]
-    del user["_id"]
-    return User(**user)
+# Initialize FastAPI app
+app = FastAPI(title="JoinUp API", version="1.0.0")
 
-# ============= EVENT ROUTES =============
-@api_router.post("/events", response_model=Event)
-async def create_event(
-    event_data: EventCreate,
-    current_user: dict = Depends(require_role([UserRole.ORGANIZER]))
-):
-    organizer = await db.users.find_one({"id": current_user["sub"]})
-    
-    event_dict = event_data.model_dump()
-    event_dict["id"] = str(uuid.uuid4())
-    event_dict["organizer_id"] = current_user["sub"]
-    event_dict["organizer_name"] = organizer["name"]
-    event_dict["current_registrations"] = 0
-    event_dict["created_at"] = datetime.utcnow()
-    
-    await db.events.insert_one(event_dict)
-    del event_dict["_id"]
-    
-    return Event(**event_dict)
-
-@api_router.get("/events", response_model=List[Event])
-async def get_events(
-    search: str = None,
-    college: str = None,
-    current_user: dict = Depends(get_current_user)
-):
-    query = {}
-    if search:
-        query["$or"] = [
-            {"title": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}}
-        ]
-    if college:
-        query["college"] = college
-    
-    events = await db.events.find(query).sort("date", 1).to_list(1000)
-    return [Event(**{**event, "_id": str(event["_id"])}) for event in events]
-
-@api_router.get("/events/{event_id}", response_model=Event)
-async def get_event(event_id: str, current_user: dict = Depends(get_current_user)):
-    event = await db.events.find_one({"id": event_id})
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-    del event["_id"]
-    return Event(**event)
-
-@api_router.get("/events/organizer/my-events", response_model=List[Event])
-async def get_my_events(current_user: dict = Depends(require_role([UserRole.ORGANIZER]))):
-    events = await db.events.find({"organizer_id": current_user["sub"]}).sort("date", -1).to_list(1000)
-    return [Event(**{**event, "_id": str(event["_id"])}) for event in events]
-
-# ============= REGISTRATION ROUTES =============
-@api_router.post("/registrations", response_model=Registration)
-async def register_for_event(
-    reg_data: RegistrationCreate,
-    current_user: dict = Depends(require_role([UserRole.STUDENT]))
-):
-    # Check if event exists
-    event = await db.events.find_one({"id": reg_data.event_id})
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Check if already registered
-    existing = await db.registrations.find_one({
-        "student_id": current_user["sub"],
-        "event_id": reg_data.event_id
-    })
-    if existing:
-        raise HTTPException(status_code=400, detail="Already registered for this event")
-    
-    # Check max participants
-    if event.get("max_participants") and event["current_registrations"] >= event["max_participants"]:
-        raise HTTPException(status_code=400, detail="Event is full")
-    
-    # Get student info
-    student = await db.users.find_one({"id": current_user["sub"]})
-    
-    # Create registration
-    reg_id = str(uuid.uuid4())
-    qr_data = f"joinup-{reg_id}"
-    
-    reg_dict = {
-        "id": reg_id,
-        "student_id": current_user["sub"],
-        "student_name": student["name"],
-        "event_id": reg_data.event_id,
-        "event_title": event["title"],
-        "payment_status": PaymentStatus.PAID,  # Mock payment
-        "qr_code_data": qr_data,
-        "attendance_marked": False,
-        "attendance_time": None,
-        "certificate_issued": False,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.registrations.insert_one(reg_dict)
-    
-    # Update event registration count
-    await db.events.update_one(
-        {"id": reg_data.event_id},
-        {"$inc": {"current_registrations": 1}}
-    )
-    
-    del reg_dict["_id"]
-    return Registration(**reg_dict)
-
-@api_router.get("/registrations/my-registrations", response_model=List[Registration])
-async def get_my_registrations(current_user: dict = Depends(require_role([UserRole.STUDENT]))):
-    registrations = await db.registrations.find({"student_id": current_user["sub"]}).sort("created_at", -1).to_list(1000)
-    return [Registration(**{**reg, "_id": str(reg["_id"])}) for reg in registrations]
-
-@api_router.get("/registrations/event/{event_id}", response_model=List[Registration])
-async def get_event_registrations(
-    event_id: str,
-    current_user: dict = Depends(require_role([UserRole.ORGANIZER]))
-):
-    # Verify organizer owns this event
-    event = await db.events.find_one({"id": event_id, "organizer_id": current_user["sub"]})
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found or access denied")
-    
-    registrations = await db.registrations.find({"event_id": event_id}).to_list(1000)
-    return [Registration(**{**reg, "_id": str(reg["_id"])}) for reg in registrations]
-
-# ============= ATTENDANCE ROUTES =============
-@api_router.post("/attendance/mark")
-async def mark_attendance(
-    attendance_data: AttendanceMarkRequest,
-    current_user: dict = Depends(require_role([UserRole.ORGANIZER]))
-):
-    registration = await db.registrations.find_one({"qr_code_data": attendance_data.qr_code_data})
-    if not registration:
-        raise HTTPException(status_code=404, detail="Invalid QR code")
-    
-    # Verify organizer owns the event
-    event = await db.events.find_one({"id": registration["event_id"], "organizer_id": current_user["sub"]})
-    if not event:
-        raise HTTPException(status_code=403, detail="You don't have permission to mark attendance for this event")
-    
-    if registration["attendance_marked"]:
-        raise HTTPException(status_code=400, detail="Attendance already marked")
-    
-    await db.registrations.update_one(
-        {"id": registration["id"]},
-        {"$set": {"attendance_marked": True, "attendance_time": datetime.utcnow()}}
-    )
-    
-    return {"message": "Attendance marked successfully", "student_name": registration["student_name"]}
-
-# ============= CERTIFICATE ROUTES =============
-@api_router.post("/certificates/issue", response_model=Certificate)
-async def issue_certificate(
-    cert_data: CertificateIssueRequest,
-    current_user: dict = Depends(require_role([UserRole.ORGANIZER]))
-):
-    registration = await db.registrations.find_one({"id": cert_data.registration_id})
-    if not registration:
-        raise HTTPException(status_code=404, detail="Registration not found")
-    
-    # Verify organizer owns the event
-    event = await db.events.find_one({"id": registration["event_id"], "organizer_id": current_user["sub"]})
-    if not event:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    if not registration["attendance_marked"]:
-        raise HTTPException(status_code=400, detail="Cannot issue certificate - attendance not marked")
-    
-    if registration["certificate_issued"]:
-        # Return existing certificate
-        existing_cert = await db.certificates.find_one({"registration_id": cert_data.registration_id})
-        if existing_cert:
-            del existing_cert["_id"]
-            return Certificate(**existing_cert)
-    
-    # Generate certificate
-    event_date = event["date"].strftime("%B %d, %Y")
-    cert_pdf = generate_certificate_pdf(registration["student_name"], event["title"], event_date)
-    
-    cert_dict = {
-        "id": str(uuid.uuid4()),
-        "registration_id": cert_data.registration_id,
-        "student_id": registration["student_id"],
-        "student_name": registration["student_name"],
-        "event_id": registration["event_id"],
-        "event_title": registration["event_title"],
-        "issued_date": datetime.utcnow(),
-        "certificate_data": cert_pdf
-    }
-    
-    await db.certificates.insert_one(cert_dict)
-    await db.registrations.update_one(
-        {"id": cert_data.registration_id},
-        {"$set": {"certificate_issued": True}}
-    )
-    
-    del cert_dict["_id"]
-    return Certificate(**cert_dict)
-
-@api_router.get("/certificates/my-certificates", response_model=List[Certificate])
-async def get_my_certificates(current_user: dict = Depends(require_role([UserRole.STUDENT]))):
-    certificates = await db.certificates.find({"student_id": current_user["sub"]}).sort("issued_date", -1).to_list(1000)
-    return [Certificate(**{**cert, "_id": str(cert["_id"])}) for cert in certificates]
-
-# ============= DASHBOARD ROUTES =============
-@api_router.get("/dashboard/student", response_model=StudentDashboard)
-async def get_student_dashboard(current_user: dict = Depends(require_role([UserRole.STUDENT]))):
-    registrations = await db.registrations.find({"student_id": current_user["sub"]}).to_list(1000)
-    
-    total_events = len(registrations)
-    attended_events = sum(1 for reg in registrations if reg["attendance_marked"])
-    certificates_earned = sum(1 for reg in registrations if reg["certificate_issued"])
-    
-    # Upcoming events (not attended yet and event date is in future)
-    upcoming = 0
-    for reg in registrations:
-        if not reg["attendance_marked"]:
-            event = await db.events.find_one({"id": reg["event_id"]})
-            if event and event["date"] > datetime.utcnow():
-                upcoming += 1
-    
-    return StudentDashboard(
-        total_events_registered=total_events,
-        attended_events=attended_events,
-        certificates_earned=certificates_earned,
-        upcoming_events=upcoming
-    )
-
-@api_router.get("/dashboard/organizer", response_model=OrganizerAnalytics)
-async def get_organizer_analytics(current_user: dict = Depends(require_role([UserRole.ORGANIZER]))):
-    events = await db.events.find({"organizer_id": current_user["sub"]}).to_list(1000)
-    
-    total_events = len(events)
-    total_registrations = sum(event["current_registrations"] for event in events)
-    
-    # Count attendees
-    total_attendees = 0
-    for event in events:
-        attendees = await db.registrations.count_documents({
-            "event_id": event["id"],
-            "attendance_marked": True
-        })
-        total_attendees += attendees
-    
-    # Count upcoming vs past events
-    now = datetime.utcnow()
-    upcoming_events = sum(1 for event in events if event["date"] > now)
-    past_events = total_events - upcoming_events
-    
-    # Calculate average rating
-    total_rating = sum(event.get("average_rating", 0) * event.get("total_ratings", 0) for event in events)
-    total_rating_count = sum(event.get("total_ratings", 0) for event in events)
-    average_rating = total_rating / total_rating_count if total_rating_count > 0 else 0.0
-    
-    # Get top events by registrations
-    sorted_events = sorted(events, key=lambda x: x["current_registrations"], reverse=True)[:5]
-    top_events = [
-        {
-            "id": event["id"],
-            "title": event["title"],
-            "registrations": event["current_registrations"],
-            "rating": event.get("average_rating", 0)
-        }
-        for event in sorted_events
-    ]
-    
-    return OrganizerAnalytics(
-        total_events=total_events,
-        total_registrations=total_registrations,
-        total_attendees=total_attendees,
-        upcoming_events=upcoming_events,
-        past_events=past_events,
-        average_rating=round(average_rating, 2),
-        top_events=top_events
-    )
-
-# ============= RATING & FEEDBACK ROUTES =============
-@api_router.post("/ratings", response_model=Rating)
-async def create_rating(
-    rating_data: RatingCreate,
-    current_user: dict = Depends(require_role([UserRole.STUDENT]))
-):
-    # Check if event exists
-    event = await db.events.find_one({"id": rating_data.event_id})
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Check if student attended the event
-    registration = await db.registrations.find_one({
-        "student_id": current_user["sub"],
-        "event_id": rating_data.event_id,
-        "attendance_marked": True
-    })
-    if not registration:
-        raise HTTPException(status_code=400, detail="Can only rate events you attended")
-    
-    # Check if already rated
-    existing_rating = await db.ratings.find_one({
-        "student_id": current_user["sub"],
-        "event_id": rating_data.event_id
-    })
-    if existing_rating:
-        raise HTTPException(status_code=400, detail="Already rated this event")
-    
-    # Get student info
-    student = await db.users.find_one({"id": current_user["sub"]})
-    
-    # Create rating
-    rating_dict = {
-        "id": str(uuid.uuid4()),
-        "event_id": rating_data.event_id,
-        "student_id": current_user["sub"],
-        "student_name": student["name"],
-        "rating": rating_data.rating,
-        "feedback": rating_data.feedback,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.ratings.insert_one(rating_dict)
-    
-    # Update event average rating
-    all_ratings = await db.ratings.find({"event_id": rating_data.event_id}).to_list(1000)
-    avg_rating = sum(r["rating"] for r in all_ratings) / len(all_ratings)
-    
-    await db.events.update_one(
-        {"id": rating_data.event_id},
-        {"$set": {"average_rating": round(avg_rating, 2), "total_ratings": len(all_ratings)}}
-    )
-    
-    del rating_dict["_id"]
-    return Rating(**rating_dict)
-
-@api_router.get("/ratings/event/{event_id}", response_model=List[Rating])
-async def get_event_ratings(event_id: str, current_user: dict = Depends(get_current_user)):
-    ratings = await db.ratings.find({"event_id": event_id}).sort("created_at", -1).to_list(1000)
-    return [Rating(**{**rating, "_id": str(rating["_id"])}) for rating in ratings]
-
-# ============= RECOMMENDATIONS =============
-@api_router.get("/recommendations", response_model=List[Event])
-async def get_recommendations(current_user: dict = Depends(require_role([UserRole.STUDENT]))):
-    # Get student's registrations to understand preferences
-    registrations = await db.registrations.find({"student_id": current_user["sub"]}).to_list(1000)
-    registered_event_ids = [reg["event_id"] for reg in registrations]
-    
-    # Get events student registered for
-    registered_events = []
-    for event_id in registered_event_ids:
-        event = await db.events.find_one({"id": event_id})
-        if event:
-            registered_events.append(event)
-    
-    # Extract preferred categories
-    preferred_categories = {}
-    for event in registered_events:
-        category = event.get("category", "General")
-        preferred_categories[category] = preferred_categories.get(category, 0) + 1
-    
-    # Get student's college for local events priority
-    student = await db.users.find_one({"id": current_user["sub"]})
-    student_college = student.get("college", "")
-    
-    # Get all upcoming events not yet registered
-    all_events = await db.events.find({
-        "id": {"$nin": registered_event_ids},
-        "date": {"$gt": datetime.utcnow()}
-    }).to_list(1000)
-    
-    # Score events based on multiple factors
-    scored_events = []
-    for event in all_events:
-        score = 0
-        
-        # Category preference (40% weight)
-        category = event.get("category", "General")
-        if category in preferred_categories:
-            score += 40 * (preferred_categories[category] / len(registered_events))
-        
-        # Same college (30% weight)
-        if event.get("college") == student_college:
-            score += 30
-        
-        # Rating (20% weight)
-        avg_rating = event.get("average_rating", 0)
-        score += 20 * (avg_rating / 5.0)
-        
-        # Popularity (10% weight)
-        registrations_count = event.get("current_registrations", 0)
-        if registrations_count > 0:
-            score += 10 * min(registrations_count / 50.0, 1.0)
-        
-        scored_events.append((score, event))
-    
-    # Sort by score and return top 10
-    scored_events.sort(key=lambda x: x[0], reverse=True)
-    recommended_events = [event for score, event in scored_events[:10]]
-    
-    return [Event(**{**event, "_id": str(event["_id"])}) for event in recommended_events]
-
-# ============= ADMIN ROUTES =============
-@api_router.get("/admin/users", response_model=List[User])
-async def get_all_users(current_user: dict = Depends(require_role([UserRole.ADMIN]))):
-    users = await db.users.find().to_list(1000)
-    result = []
-    for user in users:
-        del user["password"]
-        del user["_id"]
-        result.append(User(**user))
-    return result
-
-@api_router.get("/admin/events", response_model=List[Event])
-async def get_all_events_admin(current_user: dict = Depends(require_role([UserRole.ADMIN]))):
-    events = await db.events.find().sort("created_at", -1).to_list(1000)
-    return [Event(**{**event, "_id": str(event["_id"])}) for event in events]
-
-# Include the router in the main app
-app.include_router(api_router)
-
+# Add CORS middleware FIRST (before routes)
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
+# ===== MODELS =====
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    name: str
+    college: str
+    role: str = "student"
+    department: Optional[str] = None
+    year: Optional[int] = None
+    organization_name: Optional[str] = None
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    college: str
+    role: str
+    department: Optional[str] = None
+    year: Optional[int] = None
+    organization_name: Optional[str] = None
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+# ===== UTILITY FUNCTIONS =====
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode(), salt).decode()
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify password against hash"""
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+def create_access_token(data: dict, expires_days: int = ACCESS_TOKEN_EXPIRE_DAYS):
+    """Create JWT token"""
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(days=expires_days)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(credentials: Optional[dict] = Depends(lambda: None)):
+    """Get current user from token - placeholder for now"""
+    # This is used as an optional dependency for routes that don't require auth
+    return credentials
+
+def decode_token(token: str) -> Optional[dict]:
+    """Decode JWT token"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+# ===== AUTH ROUTES =====
+@app.post("/api/auth/register", response_model=TokenResponse)
+async def register(user_data: UserCreate):
+    """Register a new user"""
+    try:
+        logger.info(f"Registration attempt for: {user_data.email}")
+        
+        # Validate input
+        if not user_data.email or not user_data.password or not user_data.name:
+            raise HTTPException(status_code=400, detail="Email, password, and name are required")
+        
+        if len(user_data.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        
+        # Check if user already exists
+        existing_user = await db.users.find_one({"email": user_data.email.lower()})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Create new user
+        user_id = str(uuid.uuid4())
+        hashed_password = hash_password(user_data.password)
+        
+        user_dict = {
+            "id": user_id,
+            "email": user_data.email.lower(),
+            "password": hashed_password,
+            "name": user_data.name,
+            "college": user_data.college,
+            "role": user_data.role or "student",
+            "department": user_data.department,
+            "year": user_data.year,
+            "organization_name": user_data.organization_name,
+            "created_at": datetime.now(timezone.utc),
+            "is_approved": True,
+        }
+        
+        await db.users.insert_one(user_dict)
+        logger.info(f"User registered: {user_data.email}")
+        
+        # Create token
+        access_token = create_access_token({"sub": user_id, "role": user_data.role or "student"})
+        
+        # Return user without password
+        user_response = UserResponse(
+            id=user_id,
+            email=user_data.email,
+            name=user_data.name,
+            college=user_data.college,
+            role=user_data.role or "student",
+            department=user_data.department,
+            year=user_data.year,
+            organization_name=user_data.organization_name,
+        )
+        
+        return TokenResponse(access_token=access_token, user=user_response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    """Login user"""
+    try:
+        logger.info(f"Login attempt for: {credentials.email}")
+        
+        if not credentials.email or not credentials.password:
+            raise HTTPException(status_code=400, detail="Email and password are required")
+        
+        # Find user
+        user = await db.users.find_one({"email": credentials.email.lower()})
+        if not user:
+            logger.warning(f"User not found: {credentials.email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Verify password
+        if not verify_password(credentials.password, user["password"]):
+            logger.warning(f"Invalid password for: {credentials.email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Create token
+        access_token = create_access_token({"sub": user["id"], "role": user["role"]})
+        logger.info(f"User logged in: {credentials.email}")
+        
+        # Return user without password
+        user_response = UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            college=user["college"],
+            role=user["role"],
+            department=user.get("department"),
+            year=user.get("year"),
+            organization_name=user.get("organization_name"),
+        )
+        
+        return TokenResponse(access_token=access_token, user=user_response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+# ===== HEALTH CHECK =====
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    try:
+        # Try to ping MongoDB using client.admin
+        await client.admin.command('ping')
+        return {"status": "healthy", "service": "JoinUp API", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Database connection failed: {str(e)}")
+        return {"status": "unhealthy", "service": "JoinUp API", "database": "disconnected"}
+
+# ===== TEST ROUTE =====
+@app.get("/api/test")
+async def test_route():
+    """Test route to verify API is working"""
+    return {"message": "API is working", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+# ===== EVENTS ROUTES =====
+@app.get("/api/events")
+async def get_events(search: str = None, current_user: dict = None):
+    """Get all events with optional search"""
+    try:
+        query = {}
+        if search:
+            query["$or"] = [
+                {"title": {"$regex": search, "$options": "i"}},
+                {"description": {"$regex": search, "$options": "i"}}
+            ]
+        
+        events = await db.events.find(query).to_list(100)
+        return [
+            {
+                "id": event.get("id", str(event.get("_id"))),
+                "title": event.get("title", ""),
+                "description": event.get("description", ""),
+                "date": event.get("date", ""),
+                "venue": event.get("venue", ""),
+                "fee": event.get("fee", 0),
+                "college": event.get("college", ""),
+                "category": event.get("category", ""),
+                "organizer_name": event.get("organizer_name", ""),
+                "current_registrations": event.get("current_registrations", 0),
+                "max_participants": event.get("max_participants"),
+            }
+            for event in events
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching events: {str(e)}")
+        return []
+
+@app.get("/api/dashboard/student")
+async def get_student_dashboard(current_user: dict = None):
+    """Get student dashboard stats"""
+    try:
+        # For now, return dummy stats - backend can track these later
+        return {
+            "total_events_registered": 0,
+            "attended_events": 0,
+            "certificates_earned": 0,
+            "upcoming_events": 0,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching dashboard: {str(e)}")
+        return {
+            "total_events_registered": 0,
+            "attended_events": 0,
+            "certificates_earned": 0,
+            "upcoming_events": 0,
+        }
+
+@app.get("/api/dashboard/organizer")
+async def get_organizer_dashboard(current_user: dict = None):
+    """Get organizer dashboard stats"""
+    try:
+        return {
+            "total_events_created": 0,
+            "total_registrations": 0,
+            "total_attendees": 0,
+            "pending_certificates": 0,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching organizer dashboard: {str(e)}")
+        return {
+            "total_events_created": 0,
+            "total_registrations": 0,
+            "total_attendees": 0,
+            "pending_certificates": 0,
+        }
+
+@app.get("/api/events/organizer/my-events")
+async def get_organizer_events(current_user: dict = None):
+    """Get events created by organizer"""
+    try:
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        
+        organizer_id = current_user.get("sub")
+        events = await db.events.find({"organizer_id": organizer_id}).to_list(None)
+        
+        return [
+            {
+                "id": event.get("id"),
+                "title": event.get("title"),
+                "description": event.get("description"),
+                "date": event.get("date"),
+                "venue": event.get("venue"),
+                "current_registrations": event.get("current_registrations", 0),
+                "max_participants": event.get("max_participants"),
+            }
+            for event in events
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching organizer events: {str(e)}")
+        return []
+
+@app.post("/api/events")
+async def create_event(event_data: dict):
+    """Create new event"""
+    try:
+        event_dict = {
+            "id": str(uuid.uuid4()),
+            "title": event_data.get("title", ""),
+            "description": event_data.get("description", ""),
+            "date": event_data.get("date", ""),
+            "venue": event_data.get("venue", ""),
+            "fee": event_data.get("fee", 0),
+            "college": event_data.get("college", ""),
+            "category": event_data.get("category", ""),
+            "organizer_name": event_data.get("organizer_name", ""),
+            "current_registrations": 0,
+            "max_participants": event_data.get("max_participants"),
+            "created_at": datetime.now(timezone.utc),
+        }
+        
+        result = await db.events.insert_one(event_dict)
+        event_dict["_id"] = str(result.inserted_id)
+        
+        # Remove MongoDB _id from response
+        response = {k: v for k, v in event_dict.items() if k != "_id"}
+        return response
+    except Exception as e:
+        logger.error(f"Error creating event: {str(e)}")
+        raise HTTPException(status_code=400, detail="Failed to create event")
+
+@app.get("/api/registrations/my-registrations")
+async def get_my_registrations():
+    """Get user's event registrations"""
+    try:
+        registrations = await db.registrations.find({}).to_list(100)
+        return [
+            {
+                "id": reg.get("id", str(reg.get("_id"))),
+                "event_id": reg.get("event_id", ""),
+                "user_id": reg.get("user_id", ""),
+                "status": reg.get("status", "registered"),
+                "created_at": reg.get("created_at", ""),
+            }
+            for reg in registrations
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching registrations: {str(e)}")
+        return []
+
+@app.post("/api/registrations")
+async def register_for_event(registration_data: dict):
+    """Register for an event"""
+    try:
+        registration_dict = {
+            "id": str(uuid.uuid4()),
+            "event_id": registration_data.get("event_id"),
+            "user_id": registration_data.get("user_id"),
+            "status": "registered",
+            "created_at": datetime.now(timezone.utc),
+        }
+        
+        result = await db.registrations.insert_one(registration_dict)
+        registration_dict["_id"] = str(result.inserted_id)
+        
+        # Remove MongoDB _id from response
+        response = {k: v for k, v in registration_dict.items() if k != "_id"}
+        return response
+    except Exception as e:
+        logger.error(f"Error registering for event: {str(e)}")
+        raise HTTPException(status_code=400, detail="Failed to register")
+
+# ===== STARTUP/SHUTDOWN =====
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Starting up...")
+    try:
+        # Check if MongoDB is available
+        result = await client.admin.command('ping')
+        logger.info("MongoDB connected successfully")
+    except Exception as e:
+        logger.warning(f"MongoDB connection warning (will try again on first request): {str(e)}")
+
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def shutdown_event():
+    logger.info("Shutting down...")
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

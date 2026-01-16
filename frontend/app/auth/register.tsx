@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
-import { colors, spacing, borderRadius, typography } from '../theme';
+import { colors, spacing, borderRadius, typography } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { Picker } from '@react-native-picker/picker';
@@ -34,17 +34,51 @@ export default function Register() {
     organization_name: '',
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const handleRegister = async () => {
-    if (!formData.email || !formData.password || !formData.name || !formData.college) {
-      Alert.alert('Error', 'Please fill all required fields');
+    setError(null);
+
+    // Validation
+    if (!formData.name.trim()) {
+      setError('Name is required');
+      return;
+    }
+
+    if (!formData.email.trim()) {
+      setError('Email is required');
+      return;
+    }
+
+    if (!validateEmail(formData.email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
+    if (!formData.password) {
+      setError('Password is required');
+      return;
+    }
+
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    if (!formData.college.trim()) {
+      setError('College/University is required');
       return;
     }
 
     setLoading(true);
     try {
       const data: any = {
-        email: formData.email,
+        email: formData.email.toLowerCase(),
         password: formData.password,
         name: formData.name,
         college: formData.college,
@@ -59,9 +93,11 @@ export default function Register() {
       }
 
       await register(data);
+      setError(null);
       // Navigation will be handled by the AuthContext
     } catch (error: any) {
-      Alert.alert('Registration Failed', error.message);
+      const errorMessage = error.message || 'Registration failed';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -91,6 +127,13 @@ export default function Register() {
           </View>
 
           <View style={styles.form}>
+            {error && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={20} color={colors.error} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+
             <View style={styles.inputContainer}>
               <Ionicons name="person" size={20} color={colors.textSecondary} style={styles.inputIcon} />
               <TextInput
@@ -98,6 +141,7 @@ export default function Register() {
                 placeholder="Full Name *"
                 value={formData.name}
                 onChangeText={(text) => setFormData({ ...formData, name: text })}
+                editable={!loading}
                 placeholderTextColor={colors.textSecondary}
               />
             </View>
@@ -111,6 +155,7 @@ export default function Register() {
                 onChangeText={(text) => setFormData({ ...formData, email: text })}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                editable={!loading}
                 placeholderTextColor={colors.textSecondary}
               />
             </View>
@@ -123,6 +168,7 @@ export default function Register() {
                 value={formData.password}
                 onChangeText={(text) => setFormData({ ...formData, password: text })}
                 secureTextEntry
+                editable={!loading}
                 placeholderTextColor={colors.textSecondary}
               />
             </View>
@@ -134,6 +180,7 @@ export default function Register() {
                 placeholder="College/University *"
                 value={formData.college}
                 onChangeText={(text) => setFormData({ ...formData, college: text })}
+                editable={!loading}
                 placeholderTextColor={colors.textSecondary}
               />
             </View>
@@ -245,6 +292,21 @@ const styles = StyleSheet.create({
   },
   form: {
     marginTop: spacing.md,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.error,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  errorText: {
+    ...typography.body,
+    color: colors.white,
+    marginLeft: spacing.sm,
+    flex: 1,
   },
   inputContainer: {
     flexDirection: 'row',

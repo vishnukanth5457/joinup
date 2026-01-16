@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
-import { colors, spacing, typography } from '../theme';
+import { colors, spacing, typography } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -19,8 +19,15 @@ export default function AdminDashboard() {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await logout();
-            router.replace('/');
+            try {
+              console.log('[AdminDashboard] Logout button pressed, calling logout()');
+              await logout();
+              console.log('[AdminDashboard] Logout completed successfully');
+              // Don't navigate here - index.tsx will handle navigation when user becomes null
+            } catch (error) {
+              console.error('[AdminDashboard] Logout failed:', error);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
           },
         },
       ]
