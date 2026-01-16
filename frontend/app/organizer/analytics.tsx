@@ -87,7 +87,7 @@ export default function OrganizerAnalytics() {
 
         <View style={[styles.overviewCard, { backgroundColor: colors.accent }]}>
           <Ionicons name="star" size={32} color={colors.white} />
-          <Text style={styles.overviewNumber}>{analytics?.average_rating.toFixed(1) || 0}</Text>
+          <Text style={styles.overviewNumber}>{(analytics?.average_rating ?? 0).toFixed(1)}</Text>
           <Text style={styles.overviewLabel}>Avg Rating</Text>
         </View>
       </View>
@@ -144,7 +144,7 @@ export default function OrganizerAnalytics() {
           <View style={styles.metricRow}>
             <Text style={styles.metricLabel}>Attendance Rate</Text>
             <Text style={styles.metricValue}>
-              {analytics?.total_registrations > 0
+              {analytics && analytics.total_registrations > 0
                 ? ((analytics.total_attendees / analytics.total_registrations) * 100).toFixed(1)
                 : 0}
               %
